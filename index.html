@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Dodge!</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" type="text/css" media="screen" href="reset.css" />
+  <link rel="stylesheet" type="text/css" media="screen" href="style.css" />
+  <script src="phaser.js"></script>
+</head>
+
+<body>
+  <script type="text/javascript">
+
+    var config = {
+      type: Phaser.AUTO,
+      width: 800, //X
+      height: 600, //Y
+      input: {
+        gamepad: true
+      },
+      physics: {
+        default: 'arcade',
+        arcade: {
+          gravity: 0,
+          debug: false,
+        }
+      },
+      scene: {
+        preload: preload,
+        create: create,
+        update: update
+      }
+    };
+
+    var player; //Single Entity
+    var playerMovement = 5; //Player Movement
+    var enemies; //Group Entity
+    var spawnTime = 500; //Spawn Time
+    var points; //Point
+    var lives = 10; //Lives
+    var livesTxt; //Lives Text
+    var startTxt; //Start Text
+    var startPressed = false; //Start Pressed
+    var instruction; //Instruction
+    var gamepadIns; //Gamepad Instruction
+    var time = 0; //Time Survived
+    var timecounter; //Time
+    var endTxt; //End Text
+    var createE; //Enemies
+    var createH; //Health
+    var gameOver = false; //State
+
+    var game = new Phaser.Game(config);
+
+    function preload() {
+      this.load.image('BG', 'assets/BG.png'); //Background
+      this.load.image('ENE', 'assets/Enemy.png'); //Regular
+      this.load.image('SENE', 'assets/SEnemy.png'); //Charge
+      this.load.image('SSENE', 'assets/SSEnemy.png'); //Charge!
+      this.load.image('PNT', 'assets/Point.png'); //Point
+      this.load.image('PYER', 'assets/Player.png'); //Player
+    }
+
+    function create() {
+      //Reference The Real "This"
+      var physics = this.physics;
+
+      //Background
+      this.add.image(400, 300, 'BG');
+      livesTxt = this.add.text(16, 16, 'Lives: 10', { font: '24px Arial', fill: '#fff' });
+
+      //Start Words
+      instruction = this.add.text(315, 200, 'WASD TO MOVE', { font: '24px Arial', fill: '#fff' });
+      gamepadIns = this.add.text(275, 225, 'Or Connect A Gamepad', { font: '24px Arial', fill: '#fff' });
+      startTxt = this.add.text(295, 350, 'Press Space To Start', { font: '24px Arial', fill: '#fff' });
+
+      //Gamepad Connection
+      this.input.gamepad.once('connected', function (pad) {
+        instruction.visible = false;
+        gamepadIns.setText('Use Your Joystick');
+        gamepadIns.x = 310;
+        startTxt.setText('Press A To Start');
+        startTxt.x = 315;
+      })
+
+      //End Words
+      endTxt = this.add.text(250, 100, 'You Survived', { font: '24px Arial', fill: '#fff' });
+      endTxt.visible = false;
+
+      //Player
+      player = physics.add.image(400, 300, 'PYER');
+      player.setCollideWorldBounds(true);
+
+      //Enemy
+      enemies = physics.add.group();
+      //Animation - Kinda
+      timedEvent = this.time.addEvent({ delay: 10, callback: onEvent, callbackScope: this, loop: true });
+
+      //Point
+      points = physics.add.group();
+
+      //WASD Controls
+      this.key_W = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W);
+      this.key_A = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
+      this.key_S = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+      this.key_D = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+      this.key_SPACE = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+      //Overlap Function For Collisions
+      physics.add.overlap(player, enemies, collidedWithEnemy, null, this);
+      physics.add.overlap(player, points, collidedWithPoint, null, this);
+    }
+
+    function update(delta) {
+      //End Condition
+      if (gameOver) {
+        endTxt.visible = true;
+        endTxt.setText('You Survived For ' + time + ' Seconds');
+        clearInterval(timecounter);
+        clearInterval(createE);
+        clearInterval(createH);
+        this.scene.pause();
+      }
+  
+      //WASD Controls
+      if (this.key_SPACE.isDown && !startPressed) {
+        startPressed = true;
+        startTxt.visible = false;
+        instruction.visible = false;
+        gamepadIns.visible = false;
+        createEnemies(this.physics);
+        createHealth(this.physics);
+        timeStart();
+      }
+      if (this.key_W.isDown) {
+        player.y -= playerMovement;
+      };
+      if (this.key_A.isDown) {
+        player.x -= playerMovement;
+      };
+      if (this.key_S.isDown) {
+        player.y += playerMovement;
+      };
+      if (this.key_D.isDown) {
+        player.x += playerMovement;
+      };
+
+      //Gamepad Controls
+      if (this.input.gamepad.total === 0) {
+        return;
+      }
+      this.pad = this.input.gamepad.getPad(0);
+      if (this.pad.axes.length) {
+        var axisH = this.pad.axes[0].getValue();
+        var axisV = this.pad.axes[1].getValue();
+
+        player.x += playerMovement * axisH;
+        player.y += playerMovement * axisV;
+
+        player.flipX = (axisH > 0);
+      }
+      if (this.pad.A && !startPressed) {
+        startPressed = true;
+        startTxt.visible = false;
+        instruction.visible = false;
+        gamepadIns.visible = false;
+        createEnemies(this.physics);
+        createHealth(this.physics);
+        timeStart();
+      }
+
+    }
+
+    //Randomly Places Enemy Inside Edge Of PlayField
+    function randomSpawnE(enemy) {
+      if (Phaser.Math.Between(0, 1) < 0.5) {
+        enemy.setX(Phaser.Math.Between(0, config.width));
+        enemy.setY(Phaser.Math.Between(0, config.height));
+        if (enemy.x > 50 && enemy.x < 750) {
+          enemy.setX(Phaser.Math.Between(0, 1) < 0.5 ? Phaser.Math.Between(0, 50) : Phaser.Math.Between(750, 800));
+        }
+      } else {
+        enemy.setX(Phaser.Math.Between(0, config.width));
+        enemy.setY(Phaser.Math.Between(0, config.height));
+        if (enemy.y > 50 && enemy.y < 550) {
+          enemy.setY(Phaser.Math.Between(0, 1) < 0.5 ? Phaser.Math.Between(0, 50) : Phaser.Math.Between(550, 600));
+        }
+      }
+    };
+
+    //Randomly Places Health Point Inside Of PlayField
+    function randomSpawn(point) {
+      point.setX(Phaser.Math.Between(200, config.width - 200));
+      point.setY(Phaser.Math.Between(200, config.height - 200));
+    };
+
+    //What To Do After A Collision - Enemy
+    function collidedWithEnemy(player, enemy) {
+      enemy.disableBody(true, true);
+      lives -= 1;
+      livesTxt.setText('Lives: ' + lives);
+      if (lives <= 0) {
+        gameOver = true;
+      }
+    }
+
+    //What To Do After A Collision - Point
+    function collidedWithPoint(player, point) {
+      point.disableBody(true, true);
+      playerMovement += 0.5;
+      enemies.getChildren().map(child => {
+        child.destroy();
+      })
+      lives += 1;
+      livesTxt.setText('Lives: ' + lives);
+    }
+
+    //Run Only ONCE!
+    function createEnemies(physics) {
+      var theEFunction = function () {
+        //The Random Factor For Spawning
+        var randomNum = Phaser.Math.Between(0, 100);
+        if (randomNum <= 90) {
+          //Regular Enemy
+          var enemy = enemies.create(0, 0, 'ENE');
+          //Sets Spawn Randomly
+          randomSpawnE(enemy);
+          //Set Initial Targeting
+          physics.moveToObject(enemy, player, Phaser.Math.Between(250, 500));
+        } else if (randomNum > 90 && randomNum < 95) {
+          //Charge
+          var Senemy = enemies.create(0, 0, 'SENE')
+          //Sets Spawn Randomly
+          randomSpawnE(Senemy);
+          //Attack After A Delay
+          setTimeout(function () {
+            physics.moveToObject(Senemy, player, 900);
+          }, 3000)
+          Senemy.setCollideWorldBounds(true);
+          Senemy.setBounce(1, 1);
+        } else {
+          //Charge
+          var SSenemy = enemies.create(0, 0, 'SSENE')
+          //Sets Spawn Randomly
+          randomSpawnE(SSenemy);
+          //Attack After A Delay, Turn After Delay
+          setTimeout(function () {
+            physics.moveToObject(SSenemy, player, 500);
+            setTimeout(function () {
+              physics.moveToObject(SSenemy, player, 500);
+            }, 500)
+          }, 3000)
+        }
+        enemies.getChildren().map(child => {
+          if (child.x < 0 || child.x > config.width || child.y < 0 || child.y > config.height) {
+            child.destroy();
+          }
+        })
+      }
+      createE = setInterval(theEFunction, spawnTime);
+    }
+
+    //Run Only ONCE!
+    function createHealth(physics) {
+      var physics = this.physics;
+      var theHFunction = function () {
+        //Create Entity For Points
+        var point = points.create(0, 0, 'PNT');
+        randomSpawn(point);
+      }
+      createH = setInterval(theHFunction, 30000);
+    }
+
+    //Time Survived
+    function timeStart() {
+      timecounter = setInterval(function () {
+        time += 1;
+      }, 1000);
+    }
+
+    //Rotations
+    function onEvent() {
+      enemies.getChildren().map(child => {
+        child.rotation += 0.15;
+      })
+    }
+  </script>
+</body>
+
+</html>
